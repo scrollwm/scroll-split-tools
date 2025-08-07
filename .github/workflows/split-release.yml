@@ -1,0 +1,137 @@
+name: Split Scroll Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      scroll_version:
+        description: 'Scroll version to split (e.g., 1.11.3)'
+        required: true
+        type: string
+      create_prs:
+        description: 'Create PRs (vs just test)'
+        type: boolean
+        default: true
+      dry_run:
+        description: 'Perform dry run (no changes)'
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  split-scroll:
+    name: Split Scroll ${{ inputs.scroll_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout scroll-split-tools
+        uses: actions/checkout@v4
+        with:
+          path: tools
+          
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            wayland-protocols \
+            libwayland-dev \
+            libpixman-1-dev \
+            libwlroots-dev \
+            pkg-config
+            
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
+          
+      - name: Create workspace
+        run: mkdir -p ${{ github.workspace }}/split-workspace
+        
+      - name: Run split operation
+        env:
+          GH_TOKEN: ${{ secrets.SCROLL_SPLIT_TOKEN }}
+        run: |
+          cd tools
+          python split_scroll.py \
+            "${{ inputs.scroll_version }}" \
+            --workspace "${{ github.workspace }}/split-workspace" \
+            --manifest split_manifest.json \
+            --log-level INFO \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            ${{ !inputs.create_prs && '--no-prs' || '' }}
+            
+      - name: Upload split report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: split-report-${{ inputs.scroll_version }}
+          path: |
+            ${{ github.workspace }}/split-workspace/split_report_*.md
+            ${{ github.workspace }}/split-workspace/*.log
+            
+      - name: Upload scene-scroll artifact
+        if: success() && inputs.dry_run
+        uses: actions/upload-artifact@v3
+        with:
+          name: scene-scroll-${{ inputs.scroll_version }}
+          path: ${{ github.workspace }}/split-workspace/scene-scroll/
+          
+      - name: Upload scroll-standalone artifact
+        if: success() && inputs.dry_run
+        uses: actions/upload-artifact@v3
+        with:
+          name: scroll-standalone-${{ inputs.scroll_version }}
+          path: ${{ github.workspace }}/split-workspace/scroll-standalone/
+          
+      - name: Post summary
+        if: always()
+        run: |
+          if [ -f "${{ github.workspace }}/split-workspace/split_report_"*.md ]; then
+            echo "## Split Operation Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Extract summary section from report
+            awk '/## Summary/,/^##[^#]/' "${{ github.workspace }}/split-workspace/split_report_"*.md | head -n -1 >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Split Operation Failed" >> $GITHUB_STEP_SUMMARY
+            echo "No report was generated." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+  notify-on-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: split-scroll
+    if: failure()
+    
+    steps:
+      - name: Create issue on failure
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Split operation failed for Scroll ${{ inputs.scroll_version }}`,
+              body: `The automated split operation for Scroll ${{ inputs.scroll_version }} has failed.
+              
+              **Workflow Run**: [${context.runId}](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              **Triggered by**: @${context.actor}
+              **Date**: ${new Date().toISOString()}
+              
+              Please check the workflow logs and split report for details.`,
+              labels: ['bug', 'automated-split']
+            });
+            console.log(`Created issue #${issue.data.number}`);

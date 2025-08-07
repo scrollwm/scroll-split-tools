@@ -1,0 +1,73 @@
+{
+  "version": "1.0.0",
+  "description": "Manifest for splitting Scroll into scene-scroll and scroll-standalone",
+  "scene_files": {
+    "implementation": [
+      "sway/tree/scene/color.c",
+      "sway/tree/scene/debug.c",
+      "sway/tree/scene/drag_icon.c",
+      "sway/tree/scene/ext_image_capture_source_v1.c",
+      "sway/tree/scene/layer_shell_v1.c",
+      "sway/tree/scene/output.c",
+      "sway/tree/scene/output_layout.c",
+      "sway/tree/scene/scene.c",
+      "sway/tree/scene/subsurface_tree.c",
+      "sway/tree/scene/surface.c",
+      "sway/tree/scene/xdg_shell.c"
+    ],
+    "headers": [
+      "sway/tree/scene/color.h",
+      "sway/tree/scene/output.h",
+      "include/sway/tree/scene.h"
+    ]
+  },
+  "modifications": {
+    "include_patterns": [
+      {
+        "from": "#include \"sway/tree/scene/",
+        "to": "#include <scene-scroll/"
+      },
+      {
+        "from": "#include \"sway/tree/scene\\.h\"",
+        "to": "#include <scene-scroll/scene.h>"
+      },
+      {
+        "from": "#include <sway/tree/scene/",
+        "to": "#include <scene-scroll/"
+      },
+      {
+        "from": "#include <sway/tree/scene\\.h>",
+        "to": "#include <scene-scroll/scene.h>"
+      }
+    ],
+    "build_system": {
+      "remove_sources": [
+        "sway/tree/scene/*.c"
+      ],
+      "add_dependency": "scene_scroll_dep",
+      "dependency_declaration": "scene_scroll_dep = dependency('scene-scroll', required: true)"
+    }
+  },
+  "edge_cases": {
+    "new_file_detection": {
+      "enabled": true,
+      "action": "warn",
+      "message": "New scene files detected not present in manifest"
+    },
+    "missing_file_detection": {
+      "enabled": true,
+      "action": "error",
+      "message": "Expected scene files missing from source"
+    },
+    "build_failure_handling": {
+      "retry_attempts": 1,
+      "fallback_strategy": "create_draft_pr_with_errors"
+    }
+  },
+  "pr_templates": {
+    "title_format": "Update to Scroll {version}",
+    "branch_format": "update-{version}-{date}",
+    "labels": ["automated", "scroll-update"],
+    "draft": true
+  }
+}
