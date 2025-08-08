@@ -3,16 +3,18 @@
   "description": "Manifest for splitting Scroll into scene-scroll and scroll-standalone",
   "scene_files": {
     "implementation": [
-      "sway/tree/scene/scene.c",
-      "sway/tree/scene/surface.c",
-      "sway/tree/scene/subsurface_tree.c",
+      "sway/tree/scene/debug.c",
       "sway/tree/scene/drag_icon.c",
       "sway/tree/scene/layer_shell_v1.c",
-      "sway/tree/scene/xdg_shell.c",
       "sway/tree/scene/output_layout.c",
-      "sway/tree/scene/output.c"
+      "sway/tree/scene/scene.c",
+      "sway/tree/scene/subsurface_tree.c",
+      "sway/tree/scene/surface.c",
+      "sway/tree/scene/xdg_shell.c"
     ],
-    "headers": []
+    "headers": [
+      "include/sway/tree/scene.h"
+    ]
   },
   "modifications": {
     "include_patterns": [
