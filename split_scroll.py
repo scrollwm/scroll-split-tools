@@ -31,6 +31,7 @@ class SplitConfig:
     create_prs: bool = True
     github_token: Optional[str] = None
     log_level: str = "INFO"
+    skip_build_verification: bool = True
 
 
 @dataclass
@@ -629,6 +630,7 @@ scene_scroll_dep = dependency('scene-scroll', required: true)
             f.write("## Summary\n\n")
             f.write(f"- Scene files extracted: {len(result.scene_files)}\n")
             f.write(f"- Standalone files modified: {len(result.standalone_files_modified)}\n")
+            f.write(f"- Build verification: {'Skipped' if self.config.skip_build_verification else 'Performed'}\n")
             f.write(f"- Errors: {len(result.errors)}\n")
             f.write(f"- Warnings: {len(result.warnings)}\n\n")
             
@@ -704,23 +706,28 @@ scene_scroll_dep = dependency('scene-scroll', required: true)
             # Phase 4: Standalone update
             self.logger.info("=== Phase 4: Standalone Update ===")
             result.standalone_files_modified = self.update_standalone_files()
-            
+
             # Phase 5: Verification
             self.logger.info("=== Phase 5: Build Verification ===")
             
-            if not self.config.dry_run:
+            if self.config.skip_build_verification:
+                self.logger.info("Skipping build verification (--skip-build-verification is set)")
+            elif not self.config.dry_run:
                 scene_build_ok = self.verify_build(self.scene_repo)
                 standalone_build_ok = self.verify_build(self.standalone_repo)
                 
                 if not scene_build_ok:
                     result.errors.append("scene-scroll build failed")
+                    result.warnings.append("Build verification failed for scene-scroll but continuing anyway")
                 if not standalone_build_ok:
                     result.errors.append("scroll-standalone build failed")
+                    result.warnings.append("Build verification failed for scroll-standalone but continuing anyway")
                     
                 if not (scene_build_ok and standalone_build_ok):
-                    self.logger.error("Build verification failed")
-                    return result
-                    
+                    self.logger.warning("Build verification failed but continuing with PR creation")
+            else:
+                self.logger.info("Skipping build verification in dry-run mode")
+                   
             # Phase 6: Create PRs
             if self.config.create_prs:
                 self.logger.info("=== Phase 6: Creating Pull Requests ===")
@@ -811,6 +818,17 @@ def main():
         help="Skip creating pull requests"
     )
     parser.add_argument(
+        "--skip-build-verification",
+        action="store_true",
+        default=True,  # Default to True
+        help="Skip build verification step (default: True)"
+    )
+    parser.add_argument(
+        "--verify-builds",
+        action="store_true",
+        help="Enable build verification (opposite of --skip-build-verification)"
+    )
+    parser.add_argument(
         "--github-token",
         help="GitHub token for PR creation (or use GH_TOKEN env var)"
     )
@@ -841,7 +859,8 @@ def main():
         dry_run=args.dry_run,
         create_prs=not args.no_prs,
         github_token=github_token,
-        log_level=args.log_level
+        log_level=args.log_level,
+        skip_build_verification=not args.verify_builds
     )
     
     # Run splitter

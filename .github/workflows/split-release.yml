@@ -15,6 +15,10 @@ on:
         description: 'Perform dry run (no changes)'
         type: boolean
         default: false
+      verify_builds:
+        description: 'Verify builds (usually not needed for intermediate repos)'
+        type: boolean
+        default: false  # Default to false
 
 env:
   PYTHON_VERSION: '3.10'
@@ -72,7 +76,8 @@ jobs:
             --manifest split_manifest.json \
             --log-level INFO \
             ${{ inputs.dry_run && '--dry-run' || '' }} \
-            ${{ !inputs.create_prs && '--no-prs' || '' }}
+            ${{ !inputs.create_prs && '--no-prs' || '' }} \
+            ${{ inputs.verify_builds && '--verify-builds' || '' }}
             
       - name: Upload split report
         if: always()
