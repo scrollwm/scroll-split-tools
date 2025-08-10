@@ -111,9 +111,24 @@ class ScrollSplitter:
         if target_dir.exists():
             self.logger.warning(f"Directory {target_dir} already exists, removing...")
             shutil.rmtree(target_dir)
-            
-        # Clone the repository
-        ret, _, _ = self._run_command(["git", "clone", repo_url, str(target_dir)])
+        
+        # Extract owner/repo from URL
+        # https://github.com/scrollwm/scene-scroll.git -> scrollwm/scene-scroll
+        import re
+        match = re.search(r'github\.com/([^/]+/[^/]+?)(?:\.git)?$', repo_url)
+        if match and self.config.github_token:
+            repo_spec = match.group(1)
+            # Use gh to clone with authentication
+            env = os.environ.copy()
+            env["GH_TOKEN"] = self.config.github_token
+            ret, _, _ = self._run_command(
+                ["gh", "repo", "clone", repo_spec, str(target_dir)],
+                env=env
+            )
+        else:
+            # Fallback to regular git clone
+            ret, _, _ = self._run_command(["git", "clone", repo_url, str(target_dir)])
+        
         if ret != 0:
             raise RuntimeError(f"Failed to clone {repo_url}")
             
@@ -123,7 +138,7 @@ class ScrollSplitter:
             ret, _, _ = self._run_command(["git", "checkout", ref], cwd=target_dir)
             if ret != 0:
                 raise RuntimeError(f"Failed to checkout {ref}")
-                
+
     def get_current_commit(self, repo_path: Path) -> str:
         """Get the current commit hash of a repository"""
         ret, stdout, _ = self._run_command(
