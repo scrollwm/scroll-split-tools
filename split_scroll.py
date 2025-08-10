@@ -579,16 +579,47 @@ scene_scroll_dep = dependency('scene-scroll', required: true)
         if ret != 0:
             self.logger.error("Failed to commit changes")
             return None
+        
+        # DEBUG: Check current remote
+        ret, stdout, _ = self._run_command(
+            ["git", "remote", "-v"],
+            cwd=repo_path
+        )
+        self.logger.info(f"Current remotes before push: {stdout}")
+        
+        # Push branch - Set authentication
+        if self.config.github_token:
+            self.logger.info(f"Setting authenticated remote URL for {repo_name}")
+            auth_url = f"https://x-access-token:{self.config.github_token}@github.com/scrollwm/{repo_name}.git"
+            ret, stdout, stderr = self._run_command(
+                ["git", "remote", "set-url", "origin", auth_url],
+                cwd=repo_path
+            )
+            if ret != 0:
+                self.logger.error(f"Failed to set remote URL: {stderr}")
+            else:
+                self.logger.info("Successfully set authenticated remote URL")
+                
+            # DEBUG: Check remote after setting
+            ret, stdout, _ = self._run_command(
+                ["git", "remote", "-v"],
+                cwd=repo_path
+            )
+            self.logger.info(f"Current remotes after setting auth: {stdout}")
+        else:
+            self.logger.warning("No GitHub token available!")
             
-        # Push branch
-        ret, _, _ = self._run_command(
+        ret, stdout, stderr = self._run_command(
             ["git", "push", "origin", branch_name],
             cwd=repo_path
         )
         if ret != 0:
             self.logger.error("Failed to push branch")
+            self.logger.error(f"Push error details: {stderr}")
             return None
             
+        self.logger.info(f"Successfully pushed branch {branch_name}")
+        
         # Create PR using gh CLI
         cmd = [
             "gh", "pr", "create",
