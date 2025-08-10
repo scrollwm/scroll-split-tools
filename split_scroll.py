@@ -95,7 +95,11 @@ class ScrollSplitter:
         )
         
         if result.returncode != 0:
-            self.logger.error(f"Command failed: {result.stderr}")
+            self.logger.error(f"Command failed with exit code {result.returncode}")
+            if result.stderr:
+                self.logger.error(f"stderr: {result.stderr}")
+            if result.stdout:
+                self.logger.error(f"stdout: {result.stdout}")
             
         return result.returncode, result.stdout, result.stderr
         
@@ -138,7 +142,7 @@ class ScrollSplitter:
             "unexpected_files": []
         }
         
-        # Check for expected scene files
+        # Check for expected scene files in sway/tree/scene directory
         scene_dir = self.scroll_repo / "sway/tree/scene"
         if not scene_dir.exists():
             raise RuntimeError(f"Scene directory not found: {scene_dir}")
@@ -150,22 +154,29 @@ class ScrollSplitter:
                 rel_path = file_path.relative_to(self.scroll_repo)
                 actual_files.add(str(rel_path))
                 
+        # Also check for header files in include directory
+        if "headers" in self.manifest["scene_files"]:
+            for header_path in self.manifest["scene_files"]["headers"]:
+                full_path = self.scroll_repo / header_path
+                if full_path.exists():
+                    actual_files.add(header_path)
+                
         # Compare with manifest
         expected_impl = set(self.manifest["scene_files"]["implementation"])
-        expected_headers = set(self.manifest["scene_files"]["headers"])
+        expected_headers = set(self.manifest["scene_files"].get("headers", []))
         expected_files = expected_impl | expected_headers
         
         # Find matches and discrepancies
-        for file_path in actual_files:
-            if file_path in expected_files:
+        for file_path in expected_files:
+            if file_path in actual_files or (self.scroll_repo / file_path).exists():
                 structure["scene_files"].append(Path(file_path))
             else:
-                structure["unexpected_files"].append(Path(file_path))
+                structure["missing_files"].append(Path(file_path))
                 
-        # Find missing files
-        for expected in expected_files:
-            if expected not in actual_files:
-                structure["missing_files"].append(Path(expected))
+        # Find unexpected files in scene directory
+        for file_path in actual_files:
+            if file_path not in expected_files and file_path.startswith("sway/tree/scene/"):
+                structure["unexpected_files"].append(Path(file_path))
                 
         # Log analysis results
         self.logger.info(f"Found {len(structure['scene_files'])} expected scene files")
@@ -185,15 +196,21 @@ class ScrollSplitter:
         for file_path in structure["scene_files"]:
             source = self.scroll_repo / file_path
             
+            # Skip if file doesn't exist
+            if not source.exists():
+                self.logger.warning(f"Skipping non-existent file: {source}")
+                continue
+            
             # Determine destination based on file type
             if file_path.suffix == '.c':
                 dest = self.scene_repo / "src" / file_path.name
             elif file_path.suffix == '.h':
-                if file_path.parent.name == "scene":
-                    dest = self.scene_repo / "include/scene-scroll" / file_path.name
-                else:
-                    # Headers from include/sway/tree/
+                if "include/" in str(file_path):
+                    # Main header from include directory
                     dest = self.scene_repo / "include/scene-scroll/scene.h"
+                else:
+                    # Headers from scene directory
+                    dest = self.scene_repo / "include/scene-scroll" / file_path.name
             else:
                 self.logger.warning(f"Unknown file type: {file_path}")
                 continue
@@ -234,6 +251,9 @@ add_project_arguments(
   ],
   language: 'c',
 )
+
+# Compiler
+cc = meson.get_compiler('c')
 
 # Dependencies
 wlroots = dependency('wlroots-0.20', version: ['>=0.20.0', '<0.21.0'])
@@ -289,10 +309,12 @@ install_headers(
 )
 
 # Install additional headers if they exist
+fs = import('fs')
 scene_headers = []
 foreach h : ['color.h', 'output.h']
-  if fs.exists(join_paths('include/scene-scroll', h))
-    scene_headers += join_paths('include/scene-scroll', h)
+  header_path = join_paths('include/scene-scroll', h)
+  if fs.exists(header_path)
+    scene_headers += header_path
   endif
 endforeach
 
@@ -483,22 +505,40 @@ scene_scroll_dep = dependency('scene-scroll', required: true)
         
         build_dir = repo_path / "build"
         
+        # Clean existing build directory if it exists
+        if build_dir.exists():
+            shutil.rmtree(build_dir)
+        
         # Setup build
-        ret, _, stderr = self._run_command(
+        ret, stdout, stderr = self._run_command(
             ["meson", "setup", "build"], 
             cwd=repo_path
         )
         if ret != 0:
-            self.logger.error(f"Meson setup failed: {stderr}")
+            self.logger.error(f"Meson setup failed for {repo_path.name}")
+            self.logger.error(f"stdout: {stdout}")
+            self.logger.error(f"stderr: {stderr}")
+            
+            # Try to get more info about missing dependencies
+            if "dependency" in stdout.lower() or "dependency" in stderr.lower():
+                self.logger.error("Possible missing dependency. Checking available pkg-config packages...")
+                ret2, stdout2, _ = self._run_command(["pkg-config", "--list-all"])
+                if ret2 == 0:
+                    if "wlroots" in stdout2:
+                        self.logger.info("wlroots found in pkg-config")
+                    else:
+                        self.logger.error("wlroots NOT found in pkg-config")
             return False
             
         # Compile
-        ret, _, stderr = self._run_command(
+        ret, stdout, stderr = self._run_command(
             ["ninja", "-C", "build"],
             cwd=repo_path
         )
         if ret != 0:
-            self.logger.error(f"Compilation failed: {stderr}")
+            self.logger.error(f"Compilation failed for {repo_path.name}")
+            self.logger.error(f"stdout: {stdout}")
+            self.logger.error(f"stderr: {stderr}")
             return False
             
         self.logger.info(f"Build successful for {repo_path.name}")
